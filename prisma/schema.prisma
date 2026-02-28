@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @db.Uuid
+  email        String?        @unique @db.VarChar(255)
+  displayName  String?        @db.VarChar(255)
+  photoUrl     String?        @db.VarChar(255)
+  createdAt    DateTime       @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime       @db.Timestamp(6)
+  Comment      Comment[]
+  Model        Model[]
+  Job          Job[]
+  Subscription Subscription?
+
+  @@map("Users")
+}
+
+model Model {
+  id             String    @id @db.VarChar(255)
+  title          String    @db.VarChar(255)
+  description    String?   @db.VarChar(255)
+  status         String    @db.VarChar(255)
+  output_formats Json?
+  output_urls    Json?
+  preview_url    String?   @db.VarChar(255)
+  user_id        String    @db.Uuid
+  created_at     DateTime? @db.Timestamp(6)
+  updated_at     DateTime? @db.Timestamp(6)
+  isPublic       Boolean   @default(false)
+  filePath       String    @db.VarChar(255)
+  fileType       String    @db.VarChar(255)
+  Comment        Comment[]
+  User           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  jobs           Job[]
+
+  @@index([user_id])
+  @@map("Models")
+}
+
+model Job {
+  id                    String    @id @db.VarChar(255)
+  status                String    @db.VarChar(255)
+  jobType               String    @map("job_type") @db.VarChar(255)
+  apiHandler            String    @map("api_handler") @db.VarChar(255)
+  priority              Int       @default(5) @db.SmallInt
+  error_message         String?   @db.VarChar(255)
+  inputData             Json?     @map("input_data")
+  output_formats        Json?
+  created_at            DateTime? @db.Timestamp(6)
+  updated_at            DateTime? @db.Timestamp(6)
+  processingStartedAt   DateTime? @map("processing_started_at") @db.Timestamp(6)
+  processingCompletedAt DateTime? @map("processing_completed_at") @db.Timestamp(6)
+  attempts              Int       @default(0) @db.Integer
+  model_id              String?   @db.VarChar(255)
+  user_id               String    @db.Uuid
+  Model                 Model?    @relation(fields: [model_id], references: [id], onDelete: Cascade)
+  User                  User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([model_id])
+  @@index([user_id])
+  @@index([status, jobType, priority])
+  @@map("Jobs")
+}
+
+model Comment {
+  id        String   @id @db.VarChar(255)
+  content   String   @db.Text
+  userId    String   @db.Uuid
+  modelId   String   @db.VarChar(255)
+  createdAt DateTime @default(now()) @db.Timestamp(6)
+  updatedAt DateTime @db.Timestamp(6)
+  Model     Model    @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([modelId])
+  @@index([userId])
+  @@map("Comments")
+}
+
+model Subscription {
+  id            String    @id @db.VarChar(255)
+  userId        String    @unique @db.Uuid
+  planType      String    @db.VarChar(255)
+  status        String    @db.VarChar(255)
+  startDate     DateTime  @db.Timestamp(6)
+  endDate       DateTime? @db.Timestamp(6)
+  modelsCreated Int       @default(0) @db.Integer
+  storageUsed   BigInt    @default(0) @db.BigInt
+  modelLimit    Int       @db.Integer
+  storageLimit  BigInt    @db.BigInt
+  autoRenew     Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime  @db.Timestamp(6)
+  User          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("Subscriptions")
+}
