@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import { Readable } from 'stream';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireSubscription } from '../middleware/subscription.js';
 import { modelService } from '../services/model.service.js';
 import { jobService } from '../services/job.service.js';
+import { isR2Configured, uploadImagesToR2 } from '../services/r2.service.js';
 import { success } from '../types/api.js';
 import { Errors } from '../errors/AppError.js';
 
@@ -20,7 +22,12 @@ const generateBody = z.object({
   textPrompt: z.string().optional(),
   imageData: z.unknown().optional(),
   imageDataArray: z.array(z.string()).optional(),
+  imageUrls: z.array(z.string().url()).optional(),
   options: z.record(z.unknown()).optional(),
+});
+
+const uploadImagesBody = z.object({
+  images: z.array(z.string()).min(1).max(100),
 });
 
 export const modelsRoutes = Router();
@@ -37,7 +44,7 @@ modelsRoutes.get('/', async (req, res, next) => {
   }
 });
 
-modelsRoutes.get('/community', async (req, res, next) => {
+modelsRoutes.get('/community', async (_req, res, next) => {
   try {
     const result = await modelService.listCommunity();
     res.json(success(result));
@@ -80,6 +87,7 @@ modelsRoutes.get('/:id/download', async (req, res, next) => {
   try {
     if (!req.user?.id) throw Errors.unauthorized();
     const model = await modelService.getById(req.params.id, req.user.id);
+    if (!model) throw Errors.notFound('Model not found');
     const urls = (model.outputUrls ?? {}) as Record<string, string>;
     const usdzUrl = urls.usdz ?? Object.values(urls)[0];
     if (!usdzUrl || typeof usdzUrl !== 'string') {
@@ -95,8 +103,12 @@ modelsRoutes.get('/:id/download', async (req, res, next) => {
       throw Errors.notFound('Storage URL returns JSON - set CLOUDFLARE_R2_PUBLIC_URL to R2 public bucket URL (e.g. https://pub-xxx.r2.dev), not the S3 API endpoint');
     }
     res.setHeader('Content-Type', contentType || 'model/vnd.usdz+zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(model.title || 'model')}.usdz"`);
-    fileRes.body?.pipe(res);
+    const name = model.title || 'model';
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}.usdz"`);
+    if (!fileRes.body) {
+      throw Errors.notFound('Empty response from storage');
+    }
+    Readable.fromWeb(fileRes.body as import('stream/web').ReadableStream).pipe(res);
   } catch (e) {
     next(e);
   }
@@ -134,11 +146,39 @@ modelsRoutes.delete('/:id', async (req, res, next) => {
   }
 });
 
+modelsRoutes.post('/upload-images', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const body = uploadImagesBody.parse(req.body);
+    if (!isR2Configured()) {
+      throw Errors.badRequest('R2 upload is not configured. Set CLOUDFLARE_R2_* env vars.');
+    }
+    const buffers: Buffer[] = [];
+    for (let i = 0; i < body.images.length; i++) {
+      let base64 = body.images[i];
+      if (typeof base64 !== 'string') continue;
+      const comma = base64.indexOf(',');
+      if (comma !== -1) base64 = base64.slice(comma + 1);
+      const buf = Buffer.from(base64, 'base64');
+      if (buf.length === 0) throw Errors.badRequest(`Invalid image data at index ${i}`);
+      buffers.push(buf);
+    }
+    if (buffers.length < 3) {
+      throw Errors.badRequest('At least 3 images required for photogrammetry.');
+    }
+    const imageUrls = await uploadImagesToR2(buffers);
+    res.status(201).json(success({ imageUrls }));
+  } catch (e) {
+    next(e);
+  }
+});
+
 modelsRoutes.post('/generate', async (req, res, next) => {
   try {
     if (!req.user?.id) throw Errors.unauthorized();
     const body = generateBody.parse(req.body);
-    console.log('[generate] userId=%s generationType=%s imageCount=%s', req.user.id, body.generationType, body.imageDataArray?.length ?? 0);
+    const imageCount = body.imageUrls?.length ?? body.imageDataArray?.length ?? 0;
+    console.log('[generate] userId=%s generationType=%s imageCount=%s', req.user.id, body.generationType, imageCount);
     const result = await jobService.createGenerationJob(req.user.id, {
       ...body,
       generationType: body.generationType,

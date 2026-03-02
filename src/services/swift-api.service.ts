@@ -88,6 +88,52 @@ export async function submitSwiftJob(params: {
   return { jobId };
 }
 
+/** Body for Swift POST /jobs/from-urls */
+type SwiftJobFromUrlsBody = {
+  title: string;
+  description?: string;
+  userId: string;
+  imageUrls: string[];
+};
+
+/**
+ * Submit a job to the Swift Photogrammetry API using R2 image URLs.
+ * Swift will download the images and run photogrammetry.
+ */
+export async function submitSwiftJobFromUrls(params: {
+  title: string;
+  description?: string;
+  userId: string;
+  imageUrls: string[];
+}): Promise<{ jobId: string }> {
+  const { title, description, userId, imageUrls } = params;
+  if (!imageUrls?.length) {
+    throw new Error('At least one image URL is required');
+  }
+
+  const body: SwiftJobFromUrlsBody = { title, userId, imageUrls };
+  if (description) body.description = description;
+
+  console.log('[swift] POST %s/jobs/from-urls with %s image URLs', SWIFT_URL, imageUrls.length);
+  const res = await fetch(`${SWIFT_URL}/jobs/from-urls`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Swift API error ${res.status}: ${text}`);
+  }
+
+  const job = (await res.json()) as { id?: string };
+  const jobId = job?.id;
+  if (!jobId) {
+    throw new Error('Swift API did not return a job id');
+  }
+  return { jobId };
+}
+
 /**
  * Get job status from the Swift Photogrammetry API.
  */

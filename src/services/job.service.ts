@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { Errors } from '../errors/AppError.js';
-import { submitSwiftJob } from './swift-api.service.js';
+import { submitSwiftJob, submitSwiftJobFromUrls } from './swift-api.service.js';
+import { isR2Configured, uploadImagesToR2 } from './r2.service.js';
 
 const GENERATION_TYPES = ['text', 'image', 'images'] as const;
 const JOB_CONFIG: Record<string, { jobType: string; apiHandler: string }> = {
@@ -18,6 +19,7 @@ export const jobService = {
       textPrompt?: string;
       imageData?: unknown;
       imageDataArray?: string[];
+      imageUrls?: string[];
       title?: string;
       description?: string;
       options?: Record<string, unknown>;
@@ -32,10 +34,15 @@ export const jobService = {
     if (data.generationType === 'image' && !data.imageData) {
       throw Errors.badRequest('Image data is required for image-to-model generation');
     }
-    if (data.generationType === 'images' && (!data.imageDataArray || data.imageDataArray.length === 0)) {
-      throw Errors.badRequest('At least one image is required for photogrammetry (images)');
+    const hasImageUrls = data.imageUrls && Array.isArray(data.imageUrls) && data.imageUrls.length > 0;
+    const hasImageData = data.imageDataArray && data.imageDataArray.length > 0;
+    if (data.generationType === 'images' && !hasImageUrls && !hasImageData) {
+      throw Errors.badRequest('At least one image is required for photogrammetry (images). Use imageUrls or imageDataArray.');
     }
-    if (data.generationType === 'images' && data.imageDataArray && data.imageDataArray.length < 3) {
+    if (data.generationType === 'images' && hasImageUrls && data.imageUrls!.length < 3) {
+      throw Errors.badRequest('Photogrammetry requires at least 3 photos from different angles (20+ recommended).');
+    }
+    if (data.generationType === 'images' && hasImageData && data.imageDataArray!.length < 3) {
       throw Errors.badRequest('Photogrammetry requires at least 3 photos from different angles (20+ recommended).');
     }
 
@@ -51,24 +58,49 @@ export const jobService = {
     };
 
     if (config.apiHandler === 'SwiftAPI') {
-      const images = data.imageDataArray?.length
-        ? data.imageDataArray
-        : typeof data.imageData === 'string'
-          ? [data.imageData]
-          : [];
-      if (images.length === 0) {
-        throw Errors.badRequest('At least one image is required for image/images generation');
+      const imageUrls = data.imageUrls && Array.isArray(data.imageUrls) ? data.imageUrls : [];
+      const imageDataArray =
+        data.imageDataArray?.length
+          ? data.imageDataArray
+          : typeof data.imageData === 'string'
+            ? [data.imageData]
+            : [];
+      if (imageUrls.length === 0 && imageDataArray.length === 0) {
+        throw Errors.badRequest('At least one image is required for image/images generation (imageUrls or imageDataArray)');
       }
       try {
-        console.log('[job] Calling Swift API with %s images...', images.length);
-        const { jobId: swiftJobId } = await submitSwiftJob({
-          title: inputData.title as string,
-          description: inputData.description as string,
-          userId,
-          imageDataArray: images,
-        });
-        console.log('[job] Swift job created swiftJobId=%s', swiftJobId);
-        inputData.swiftJobId = swiftJobId;
+        let urlsToUse = imageUrls;
+        if (urlsToUse.length === 0 && imageDataArray.length > 0 && isR2Configured()) {
+          console.log('[job] Uploading %s images to R2, then calling Swift with URLs...', imageDataArray.length);
+          const buffers = imageDataArray.map((base64) => {
+            const comma = base64.indexOf(',');
+            const b64 = comma >= 0 ? base64.slice(comma + 1) : base64;
+            return Buffer.from(b64, 'base64');
+          });
+          urlsToUse = await uploadImagesToR2(buffers);
+          console.log('[job] R2 upload done, %s URLs', urlsToUse.length);
+        }
+        if (urlsToUse.length > 0) {
+          console.log('[job] Calling Swift API with %s image URLs (R2)...', urlsToUse.length);
+          const { jobId: swiftJobId } = await submitSwiftJobFromUrls({
+            title: inputData.title as string,
+            description: inputData.description as string,
+            userId,
+            imageUrls: urlsToUse,
+          });
+          console.log('[job] Swift job created swiftJobId=%s', swiftJobId);
+          inputData.swiftJobId = swiftJobId;
+        } else {
+          console.log('[job] Calling Swift API with %s images (multipart)...', imageDataArray.length);
+          const { jobId: swiftJobId } = await submitSwiftJob({
+            title: inputData.title as string,
+            description: inputData.description as string,
+            userId,
+            imageDataArray,
+          });
+          console.log('[job] Swift job created swiftJobId=%s', swiftJobId);
+          inputData.swiftJobId = swiftJobId;
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         const cause = err instanceof Error && err.cause ? String(err.cause) : '';
