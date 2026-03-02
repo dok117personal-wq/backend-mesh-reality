@@ -7,11 +7,13 @@ import { success } from '../types/api.js';
 import { Errors } from '../errors/AppError.js';
 import { env } from '../config/env.js';
 
+/** Session cookie: persist in browser until logout or expiry (1 year). Same browser = stay logged in. */
+const SESSION_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 const COOKIE_OPTS = {
   httpOnly: true,
   secure: env.nodeEnv === 'production',
   sameSite: 'lax' as const,
-  maxAge: 30 * 24 * 60 * 60 * 1000,
+  maxAge: SESSION_MAX_AGE_MS,
   path: '/',
 };
 
@@ -54,7 +56,13 @@ authRoutes.get('/session', async (req, res, next) => {
 
 authRoutes.post('/logout', (_req, res, next) => {
   try {
-    res.clearCookie(env.sessionCookieName, { path: '/', httpOnly: true, sameSite: 'lax' });
+    res.clearCookie(env.sessionCookieName, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 0,
+      secure: env.nodeEnv === 'production',
+    });
     res.json(success(null));
   } catch (e) {
     next(e);
