@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import { corsMiddleware } from './middleware/cors.js';
@@ -13,7 +14,12 @@ export function createApp() {
   // So req.secure and req.get('x-forwarded-proto') reflect the client-facing URL (ngrok, production proxies).
   app.set('trust proxy', 1);
 
-  app.use(corsMiddleware);
+  // Public share routes: CORS that reflects request origin (no auth needed). Must run and then skip main CORS so request reaches the route.
+  app.use('/api/models/public', cors({ origin: true, credentials: false }));
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/models/public')) return next();
+    corsMiddleware(req, res, next);
+  });
   app.use(cookieParser());
   // Allow large payloads for /api/models/generate (base64 images, e.g. 50+ photos)
   app.use(express.json({ limit: '200mb' }));

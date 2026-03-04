@@ -26,7 +26,9 @@ export const env = {
   },
 
   cors: {
-    origins: (process.env.CORS_ORIGIN ?? 'http://localhost:3000').split(',').map((s) => s.trim()),
+    origins: (process.env.CORS_ORIGIN ?? 'http://localhost:3000')
+      .split(',')
+      .map((s) => s.trim().replace(/\/$/, '')),
     allowVercel: true,
   },
 

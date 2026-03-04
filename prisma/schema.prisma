@@ -23,25 +23,41 @@ model User {
 }
 
 model Model {
-  id             String    @id @db.VarChar(255)
-  title          String    @db.VarChar(255)
-  description    String?   @db.VarChar(255)
-  status         String    @db.VarChar(255)
+  id             String      @id @db.VarChar(255)
+  title          String      @db.VarChar(255)
+  description    String?     @db.VarChar(255)
+  status         String      @db.VarChar(255)
   output_formats Json?
   output_urls    Json?
-  preview_url    String?   @db.VarChar(255)
-  user_id        String    @db.Uuid
-  created_at     DateTime? @db.Timestamp(6)
-  updated_at     DateTime? @db.Timestamp(6)
-  isPublic       Boolean   @default(false)
-  filePath       String    @db.VarChar(255)
-  fileType       String    @db.VarChar(255)
+  preview_url    String?    @db.VarChar(255)
+  user_id        String     @db.Uuid
+  created_at     DateTime?  @db.Timestamp(6)
+  updated_at     DateTime?  @db.Timestamp(6)
+  isPublic       Boolean    @default(false)
+  filePath       String     @db.VarChar(255)
+  fileType       String     @db.VarChar(255)
   Comment        Comment[]
-  User           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  User           User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
   jobs           Job[]
+  ModelShare     ModelShare[]
 
   @@index([user_id])
   @@map("Models")
+}
+
+model ModelShare {
+  id          String    @id @db.VarChar(255)
+  model_id    String    @db.VarChar(255)
+  email       String    @db.VarChar(255)
+  token       String    @unique @db.VarChar(255)
+  created_at  DateTime  @default(now()) @db.Timestamp(6)
+  dismissed_at DateTime? @db.Timestamp(6)
+  Model       Model     @relation(fields: [model_id], references: [id], onDelete: Cascade)
+
+  @@index([model_id])
+  @@index([email])
+  @@index([token])
+  @@map("ModelShares")
 }
 
 model Job {

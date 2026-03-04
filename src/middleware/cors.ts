@@ -11,9 +11,15 @@ function isVercelOrigin(origin: string): boolean {
   );
 }
 
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return true;
+  const normalized = origin.replace(/\/$/, '');
+  return allowed.has(normalized) || allowed.has(origin) || isVercelOrigin(origin);
+}
+
 export const corsMiddleware = cors({
   origin: (origin, cb) => {
-    if (!origin || allowed.has(origin) || isVercelOrigin(origin)) {
+    if (isAllowedOrigin(origin ?? '')) {
       cb(null, true);
     } else {
       cb(new Error('Not allowed by CORS'));

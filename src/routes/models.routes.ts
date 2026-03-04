@@ -8,6 +8,7 @@ import { jobService } from '../services/job.service.js';
 import { isR2Configured, uploadImagesToR2 } from '../services/r2.service.js';
 import { success } from '../types/api.js';
 import { Errors } from '../errors/AppError.js';
+import { env } from '../config/env.js';
 
 const createModelBody = z.object({ title: z.string().optional(), description: z.string().optional() });
 const updateModelBody = z.object({
@@ -33,8 +34,6 @@ const uploadImagesBody = z.object({
 /** Export formats supported by pipeline (Swift outputs usdz/obj/stl; more can be added when converter supports them). */
 export const SUPPORTED_EXPORT_FORMATS = ['usdz', 'obj', 'stl', 'glb'] as const;
 export type ExportFormat = (typeof SUPPORTED_EXPORT_FORMATS)[number];
-
-const shareBody = z.object({ isPublic: z.boolean().optional() }).default({ isPublic: true });
 
 export const modelsRoutes = Router();
 
@@ -80,8 +79,68 @@ modelsRoutes.use(authMiddleware);
 modelsRoutes.get('/', async (req, res, next) => {
   try {
     if (!req.user?.id) throw Errors.unauthorized();
-    const result = await modelService.listForUser(req.user.id);
+    const userEmail = (req.user as { email?: string }).email;
+    const result = await modelService.listForUser(req.user.id, userEmail);
     res.json(success(result));
+  } catch (e) {
+    next(e);
+  }
+});
+
+const dismissShareBody = z.object({ modelId: z.string().min(1) });
+
+/** Recipient removes a shared model from their list (dismiss). Does not delete the model or revoke the share. */
+modelsRoutes.post('/shared/dismiss', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const userEmail = (req.user as { email?: string }).email;
+    if (!userEmail) throw Errors.forbidden('Account has no email');
+    const body = dismissShareBody.parse(req.body);
+    await modelService.dismissShare(body.modelId, userEmail);
+    return res.json(success({ dismissed: true }));
+  } catch (e) {
+    return next(e);
+  }
+});
+
+/** Restricted share: get model by token (only if current user's email matches share). */
+modelsRoutes.get('/shared/s/:token', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const userEmail = (req.user as { email?: string }).email;
+    if (!userEmail) throw Errors.forbidden('Account has no email; cannot use restricted share link');
+    const model = await modelService.getByShareToken(req.params.token, userEmail);
+    res.json(success(model));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Restricted share: download by token (auth + email match required). */
+modelsRoutes.get('/shared/s/:token/download', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const userEmail = (req.user as { email?: string }).email;
+    if (!userEmail) throw Errors.forbidden('Account has no email');
+    const model = await modelService.getByShareToken(req.params.token, userEmail);
+    if (!model) throw Errors.notFound('Model not found');
+    const format = (req.query.format as string)?.toLowerCase() || 'usdz';
+    const urls = (model.outputUrls ?? {}) as Record<string, string>;
+    const url = urls[format] ?? urls.usdz ?? Object.values(urls)[0];
+    if (!url || typeof url !== 'string') {
+      throw Errors.notFound('No download URL for this format. Available: ' + Object.keys(urls).join(', ') || 'none');
+    }
+    const fileRes = await fetch(url);
+    if (!fileRes.ok) throw Errors.notFound('File not available from storage');
+    const contentType = fileRes.headers.get('content-type') || 'application/octet-stream';
+    if (contentType.includes('application/json')) {
+      throw Errors.notFound('Storage URL returns JSON – check R2 public URL config');
+    }
+    const ext = format === 'usdz' ? 'usdz' : format;
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(model.title || 'model')}.${ext}"`);
+    if (!fileRes.body) throw Errors.notFound('Empty response from storage');
+    Readable.fromWeb(fileRes.body as import('stream/web').ReadableStream).pipe(res);
   } catch (e) {
     next(e);
   }
@@ -116,10 +175,42 @@ modelsRoutes.get('/jobs/:jobId', async (req, res, next) => {
   }
 });
 
+/** List people the model is shared with (restricted shares). Owner only. */
+modelsRoutes.get('/:id/shares', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const shares = await modelService.listSharesForModel(req.params.id, req.user.id);
+    const baseUrl = env.frontendUrl.replace(/\/$/, '');
+    const list = shares.map((s: { email: string; token: string; createdAt: Date }) => ({
+      email: s.email,
+      shareUrl: `${baseUrl}/share/s/${s.token}`,
+      createdAt: s.createdAt,
+    }));
+    res.json(success({ shares: list }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+const revokeShareBody = z.object({ email: z.string().email() });
+
+/** Revoke restricted share for one email. Owner only. */
+modelsRoutes.post('/:id/shares/revoke', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const body = revokeShareBody.parse(req.body);
+    await modelService.revokeShare(req.params.id, req.user.id, body.email);
+    return res.json(success({ revoked: true }));
+  } catch (e) {
+    return next(e);
+  }
+});
+
 modelsRoutes.get('/:id', async (req, res, next) => {
   try {
     if (!req.user?.id) throw Errors.unauthorized();
-    const model = await modelService.getById(req.params.id, req.user.id);
+    const userEmail = (req.user as { email?: string }).email;
+    const model = await modelService.getById(req.params.id, req.user.id, userEmail);
     res.json(success(model));
   } catch (e) {
     next(e);
@@ -129,7 +220,8 @@ modelsRoutes.get('/:id', async (req, res, next) => {
 modelsRoutes.get('/:id/download', async (req, res, next) => {
   try {
     if (!req.user?.id) throw Errors.unauthorized();
-    const model = await modelService.getById(req.params.id, req.user.id);
+    const userEmail = (req.user as { email?: string }).email;
+    const model = await modelService.getById(req.params.id, req.user.id, userEmail);
     if (!model) throw Errors.notFound('Model not found');
     const urls = (model.outputUrls ?? {}) as Record<string, string>;
     const format = (req.query.format as string)?.toLowerCase() || 'usdz';
@@ -153,17 +245,33 @@ modelsRoutes.get('/:id/download', async (req, res, next) => {
   }
 });
 
+const shareBody = z.object({
+  type: z.enum(['public', 'restricted']),
+  emails: z.array(z.string().email()).optional(),
+});
+
 modelsRoutes.post('/:id/share', async (req, res, next) => {
   try {
     if (!req.user?.id) throw Errors.unauthorized();
     const body = shareBody.parse(req.body);
-    const model = await modelService.update(req.params.id, req.user.id, { isPublic: body.isPublic });
-    if (!model) throw Errors.notFound('Model not found');
-    const baseUrl = process.env.PUBLIC_APP_URL || process.env.WEB_APP_URL || 'https://meshreality.com';
-    const shareUrl = `${baseUrl.replace(/\/$/, '')}/share/${model.id}`;
-    res.json(success({ shareUrl, isPublic: model.isPublic }));
+    const baseUrl = env.frontendUrl.replace(/\/$/, '');
+    if (body.type === 'public') {
+      const model = await modelService.setPublic(req.params.id, req.user.id);
+      if (!model) throw Errors.notFound('Model not found');
+      const shareUrl = `${baseUrl}/share/${model.id}`;
+      return res.json(success({ shareUrl, isPublic: true }));
+    }
+    const result = await modelService.createShare(req.params.id, req.user.id, {
+      type: 'restricted',
+      emails: body.emails ?? [],
+    });
+    const shareUrls = (result.shareUrls ?? []).map(({ email, token }) => ({
+      email,
+      shareUrl: `${baseUrl}/share/s/${token}`,
+    }));
+    return res.json(success({ shareUrls, isPublic: false }));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
