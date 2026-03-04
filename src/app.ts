@@ -10,6 +10,8 @@ import { commentsRoutes } from './routes/comments.routes.js';
 
 export function createApp() {
   const app = express();
+  // So req.secure and req.get('x-forwarded-proto') reflect the client-facing URL (ngrok, production proxies).
+  app.set('trust proxy', 1);
 
   app.use(corsMiddleware);
   app.use(cookieParser());

@@ -10,13 +10,17 @@ import { supabaseAuthClient } from '../config/supabase.js';
 
 /** Session cookie: persist in browser until logout or expiry (1 year). Same browser = stay logged in. */
 const SESSION_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
-const COOKIE_OPTS = {
-  httpOnly: true,
-  secure: env.nodeEnv === 'production',
-  sameSite: 'lax' as const,
-  maxAge: SESSION_MAX_AGE_MS,
-  path: '/',
-};
+/** When backend is served over HTTPS (ngrok, production), use SameSite=None; Secure so the cookie is sent on cross-origin fetch. */
+function getCookieOpts(req: { secure?: boolean; get(name: string): string | undefined }) {
+  const isSecure = req.secure === true || req.get('x-forwarded-proto') === 'https';
+  return {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: (isSecure ? 'none' : 'lax') as 'lax' | 'none',
+    maxAge: SESSION_MAX_AGE_MS,
+    path: '/',
+  };
+}
 
 const loginBody = z.object({
   access_token: z.string().optional(),
@@ -37,7 +41,7 @@ authRoutes.post('/login', async (req, res, next) => {
       return res.status(400).json({ error: { code: 'VALIDATION', message: parsed.error?.message ?? 'access_token or token required' } });
     }
     const user = await authService.login(token);
-    res.cookie(env.sessionCookieName, token, COOKIE_OPTS);
+    res.cookie(env.sessionCookieName, token, getCookieOpts(req));
     res.json(success(user));
   } catch (e) {
     return next(e);
@@ -55,14 +59,15 @@ authRoutes.get('/session', async (req, res, next) => {
   }
 });
 
-authRoutes.post('/logout', (_req, res, next) => {
+authRoutes.post('/logout', (req, res, next) => {
   try {
+    const isSecure = req.secure === true || req.get('x-forwarded-proto') === 'https';
     res.clearCookie(env.sessionCookieName, {
       path: '/',
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: isSecure ? 'none' : 'lax',
       maxAge: 0,
-      secure: env.nodeEnv === 'production',
+      secure: isSecure,
     });
     res.json(success(null));
   } catch (e) {
@@ -103,7 +108,7 @@ authRoutes.post('/google', async (req, res, next) => {
     if (error) return res.status(401).json({ error: { code: 'GOOGLE_AUTH', message: error.message } });
     if (!data?.session?.access_token) return res.status(401).json({ error: { code: 'NO_TOKEN', message: 'No session' } });
     const user = await authService.login(data.session.access_token);
-    res.cookie(env.sessionCookieName, data.session.access_token, COOKIE_OPTS);
+    res.cookie(env.sessionCookieName, data.session.access_token, getCookieOpts(req));
     res.json(success({ user, token: data.session.access_token }));
   } catch (e) {
     return next(e);
@@ -132,7 +137,7 @@ authRoutes.post('/apple', async (req, res, next) => {
     if (error) return res.status(401).json({ error: { code: 'APPLE_AUTH', message: error.message } });
     if (!data?.session?.access_token) return res.status(401).json({ error: { code: 'NO_TOKEN', message: 'No session' } });
     const user = await authService.login(data.session.access_token);
-    res.cookie(env.sessionCookieName, data.session.access_token, COOKIE_OPTS);
+    res.cookie(env.sessionCookieName, data.session.access_token, getCookieOpts(req));
     res.json(success({ user, token: data.session.access_token }));
   } catch (e) {
     return next(e);
@@ -225,7 +230,7 @@ authRoutes.post('/phone/verify', async (req, res, next) => {
     const accessToken = data?.access_token;
     if (!accessToken) return res.status(401).json({ error: { code: 'NO_TOKEN', message: 'No session' } });
     const user = await authService.login(accessToken);
-    res.cookie(env.sessionCookieName, accessToken, COOKIE_OPTS);
+    res.cookie(env.sessionCookieName, accessToken, getCookieOpts(req));
     res.json(success({ user, token: accessToken }));
   } catch (e) {
     return next(e);
