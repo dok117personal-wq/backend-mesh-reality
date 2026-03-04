@@ -30,7 +30,50 @@ const uploadImagesBody = z.object({
   images: z.array(z.string()).min(1).max(100),
 });
 
+/** Export formats supported by pipeline (Swift outputs usdz/obj/stl; more can be added when converter supports them). */
+export const SUPPORTED_EXPORT_FORMATS = ['usdz', 'obj', 'stl', 'glb'] as const;
+export type ExportFormat = (typeof SUPPORTED_EXPORT_FORMATS)[number];
+
+const shareBody = z.object({ isPublic: z.boolean().optional() }).default({ isPublic: true });
+
 export const modelsRoutes = Router();
+
+/** Public: get shared model by id (no auth). */
+modelsRoutes.get('/public/:id', async (req, res, next) => {
+  try {
+    const model = await modelService.getByIdPublic(req.params.id);
+    res.json(success(model));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Public: download shared model by format (no auth). */
+modelsRoutes.get('/public/:id/download', async (req, res, next) => {
+  try {
+    const model = await modelService.getByIdPublic(req.params.id);
+    if (!model) throw Errors.notFound('Model not found');
+    const format = (req.query.format as string)?.toLowerCase() || 'usdz';
+    const urls = (model.outputUrls ?? {}) as Record<string, string>;
+    const url = urls[format] || urls.usdz || Object.values(urls)[0];
+    if (!url || typeof url !== 'string') {
+      throw Errors.notFound('No download URL for this format. Available: ' + Object.keys(urls).join(', ') || 'none');
+    }
+    const fileRes = await fetch(url);
+    if (!fileRes.ok) throw Errors.notFound('File not available from storage');
+    const contentType = fileRes.headers.get('content-type') || 'application/octet-stream';
+    if (contentType.includes('application/json')) {
+      throw Errors.notFound('Storage URL returns JSON – check R2 public URL config');
+    }
+    const ext = format === 'usdz' ? 'usdz' : format;
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(model.title || 'model')}.${ext}"`);
+    if (!fileRes.body) throw Errors.notFound('Empty response from storage');
+    Readable.fromWeb(fileRes.body as import('stream/web').ReadableStream).pipe(res);
+  } catch (e) {
+    next(e);
+  }
+});
 
 modelsRoutes.use(authMiddleware);
 
@@ -89,26 +132,36 @@ modelsRoutes.get('/:id/download', async (req, res, next) => {
     const model = await modelService.getById(req.params.id, req.user.id);
     if (!model) throw Errors.notFound('Model not found');
     const urls = (model.outputUrls ?? {}) as Record<string, string>;
-    const usdzUrl = urls.usdz ?? Object.values(urls)[0];
-    if (!usdzUrl || typeof usdzUrl !== 'string') {
-      throw Errors.notFound('No download URL available');
+    const format = (req.query.format as string)?.toLowerCase() || 'usdz';
+    const url = urls[format] ?? urls.usdz ?? Object.values(urls)[0];
+    if (!url || typeof url !== 'string') {
+      throw Errors.notFound('No download URL for this format. Available: ' + (Object.keys(urls).length ? Object.keys(urls).join(', ') : 'none'));
     }
-    // Proxy the file to avoid CORS when R2 is on different origin
-    const fileRes = await fetch(usdzUrl);
-    if (!fileRes.ok) {
-      throw Errors.notFound('File not available from storage');
-    }
-    const contentType = fileRes.headers.get('content-type') || '';
+    const fileRes = await fetch(url);
+    if (!fileRes.ok) throw Errors.notFound('File not available from storage');
+    const contentType = fileRes.headers.get('content-type') || 'application/octet-stream';
     if (contentType.includes('application/json')) {
-      throw Errors.notFound('Storage URL returns JSON - set CLOUDFLARE_R2_PUBLIC_URL to R2 public bucket URL (e.g. https://pub-xxx.r2.dev), not the S3 API endpoint');
+      throw Errors.notFound('Storage URL returns JSON - set CLOUDFLARE_R2_PUBLIC_URL to R2 public bucket URL');
     }
-    res.setHeader('Content-Type', contentType || 'model/vnd.usdz+zip');
-    const name = model.title || 'model';
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}.usdz"`);
-    if (!fileRes.body) {
-      throw Errors.notFound('Empty response from storage');
-    }
+    const ext = format === 'usdz' ? 'usdz' : format;
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(model.title || 'model')}.${ext}"`);
+    if (!fileRes.body) throw Errors.notFound('Empty response from storage');
     Readable.fromWeb(fileRes.body as import('stream/web').ReadableStream).pipe(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+modelsRoutes.post('/:id/share', async (req, res, next) => {
+  try {
+    if (!req.user?.id) throw Errors.unauthorized();
+    const body = shareBody.parse(req.body);
+    const model = await modelService.update(req.params.id, req.user.id, { isPublic: body.isPublic });
+    if (!model) throw Errors.notFound('Model not found');
+    const baseUrl = process.env.PUBLIC_APP_URL || process.env.WEB_APP_URL || 'https://meshreality.com';
+    const shareUrl = `${baseUrl.replace(/\/$/, '')}/share/${model.id}`;
+    res.json(success({ shareUrl, isPublic: model.isPublic }));
   } catch (e) {
     next(e);
   }

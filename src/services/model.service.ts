@@ -70,6 +70,17 @@ export const modelService = {
     return toApiModel(model as ModelWithRelations);
   },
 
+  /** Public access: return model metadata + outputUrls for shared (isPublic) models. No auth. */
+  async getByIdPublic(id: string) {
+    const model = await prisma.model.findUnique({
+      where: { id },
+      include: modelInclude,
+    });
+    if (!model) throw Errors.notFound('Model not found');
+    if (!model.isPublic) throw Errors.forbidden('Model is not shared');
+    return toApiModel(model as ModelWithRelations);
+  },
+
   async listByUser(userId: string, currentUserId: string) {
     const models = await prisma.model.findMany({
       where: {
