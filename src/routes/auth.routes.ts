@@ -40,7 +40,7 @@ authRoutes.post('/login', async (req, res, next) => {
     res.cookie(env.sessionCookieName, token, COOKIE_OPTS);
     res.json(success(user));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -51,7 +51,7 @@ authRoutes.get('/session', async (req, res, next) => {
     const user = await authService.login(token);
     res.json(success(user));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -66,7 +66,7 @@ authRoutes.post('/logout', (_req, res, next) => {
     });
     res.json(success(null));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -82,7 +82,7 @@ authRoutes.get('/oauth', (req, res, next) => {
     const authUrl = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}`;
     res.redirect(302, authUrl);
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -106,7 +106,7 @@ authRoutes.post('/google', async (req, res, next) => {
     res.cookie(env.sessionCookieName, data.session.access_token, COOKIE_OPTS);
     res.json(success({ user, token: data.session.access_token }));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -135,7 +135,7 @@ authRoutes.post('/apple', async (req, res, next) => {
     res.cookie(env.sessionCookieName, data.session.access_token, COOKIE_OPTS);
     res.json(success({ user, token: data.session.access_token }));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -155,7 +155,7 @@ authRoutes.get('/google/url', (req, res, next) => {
     const authUrl = `${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
     res.json({ url: authUrl });
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -181,7 +181,7 @@ authRoutes.get('/oauth/redirect', (req, res, next) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -204,7 +204,7 @@ authRoutes.post('/phone/request', async (req, res, next) => {
     if (!r.ok) return res.status(r.status).json({ error: { code: 'OTP_FAILED', message: data?.msg ?? data?.error_description ?? 'Failed to send code' } });
     res.json(success({ sent: true }));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -228,7 +228,7 @@ authRoutes.post('/phone/verify', async (req, res, next) => {
     res.cookie(env.sessionCookieName, accessToken, COOKIE_OPTS);
     res.json(success({ user, token: accessToken }));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -238,7 +238,7 @@ authRoutes.get('/me', authMiddleware, async (req, res, next) => {
     const user = await userService.getMe(req.user.id);
     res.json(success(user));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -250,6 +250,6 @@ authRoutes.put('/me', authMiddleware, async (req, res, next) => {
     const user = await userService.updateMe(req.user.id, data);
     res.json(success(user));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });

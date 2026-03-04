@@ -48,7 +48,7 @@ export const modelService = {
       orderBy: { created_at: 'desc' },
       include: modelInclude,
     });
-    return { models: models.map((m) => toApiModel(m as ModelWithRelations)), total: models.length };
+    return { models: models.map((m) => toApiModel(m as unknown as ModelWithRelations)), total: models.length };
   },
 
   async listCommunity() {
@@ -57,7 +57,7 @@ export const modelService = {
       orderBy: { created_at: 'desc' },
       include: modelInclude,
     });
-    return { models: models.map((m) => toApiModel(m as ModelWithRelations)), total: models.length };
+    return { models: models.map((m) => toApiModel(m as unknown as ModelWithRelations)), total: models.length };
   },
 
   async getById(id: string, userId: string) {
@@ -67,7 +67,7 @@ export const modelService = {
     });
     if (!model) throw Errors.notFound('Model not found');
     if (!model.isPublic && model.user_id !== userId) throw Errors.forbidden('Access denied');
-    return toApiModel(model as ModelWithRelations);
+    return toApiModel(model as unknown as ModelWithRelations);
   },
 
   /** Public access: return model metadata + outputUrls for shared (isPublic) models. No auth. */
@@ -78,7 +78,7 @@ export const modelService = {
     });
     if (!model) throw Errors.notFound('Model not found');
     if (!model.isPublic) throw Errors.forbidden('Model is not shared');
-    return toApiModel(model as ModelWithRelations);
+    return toApiModel(model as unknown as ModelWithRelations);
   },
 
   async listByUser(userId: string, currentUserId: string) {
@@ -90,7 +90,7 @@ export const modelService = {
       orderBy: { created_at: 'desc' },
       include: modelInclude,
     });
-    return { models: models.map((m) => toApiModel(m as ModelWithRelations)), total: models.length };
+    return { models: models.map((m) => toApiModel(m as unknown as ModelWithRelations)), total: models.length };
   },
 
   async create(userId: string, data: { title?: string; description?: string }) {
@@ -110,7 +110,7 @@ export const modelService = {
       },
       include: modelInclude,
     });
-    return toApiModel(model as ModelWithRelations);
+    return toApiModel(model as unknown as ModelWithRelations);
   },
 
   async update(id: string, userId: string, data: { title?: string; description?: string; isPublic?: boolean }) {
@@ -127,7 +127,7 @@ export const modelService = {
       },
       include: modelInclude,
     });
-    return toApiModel(updated as ModelWithRelations);
+    return toApiModel(updated as unknown as ModelWithRelations);
   },
 
   async delete(id: string, userId: string) {

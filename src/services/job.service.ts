@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { Errors } from '../errors/AppError.js';
 import { submitSwiftJob, submitSwiftJobFromUrls } from './swift-api.service.js';
@@ -118,7 +119,7 @@ export const jobService = {
         priority: (data.options?.priority as number) ?? 5,
         model_id: null,
         user_id: userId,
-        inputData,
+        inputData: inputData as Prisma.InputJsonValue,
         created_at: new Date(),
         updated_at: new Date(),
       },

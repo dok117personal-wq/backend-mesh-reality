@@ -24,7 +24,7 @@ subscriptionsRoutes.get('/me', async (req, res, next) => {
     const sub = await subscriptionService.getByUserId(req.user.id);
     res.json(success(sub));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -37,7 +37,7 @@ subscriptionsRoutes.post('/', async (req, res, next) => {
     const sub = await subscriptionService.createOrUpdate(req.user.id, body);
     res.status(201).json(success(sub));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -48,7 +48,7 @@ subscriptionsRoutes.put('/usage', async (req, res, next) => {
     const sub = await subscriptionService.updateUsage(req.user.id, body);
     res.json(success(sub));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
 
@@ -58,6 +58,6 @@ subscriptionsRoutes.post('/cancel', async (req, res, next) => {
     const sub = await subscriptionService.cancel(req.user.id);
     res.json(success(sub));
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
